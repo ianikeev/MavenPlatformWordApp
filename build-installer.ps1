@@ -30,6 +30,120 @@ $jreDest   = Join-Path $appDest "jre"
 $outputDir = Join-Path $rootDir "Output"
 $mavenTargetDir = Join-Path $rootDir $mavenAppModule | Join-Path -ChildPath "target"
 
+
+# Enhanced JVM arguments injection function with correct -J prefixes
+function Add-JvmArgumentsToConfig {
+    param(
+        [string]$AppDest,
+        [string]$BrandingToken
+    )
+    
+    # Find the configuration file
+    $possibleConfFiles = @(
+        "etc/${BrandingToken}.conf",
+        "etc/netbeans.conf"
+    )
+    
+    $confFile = $null
+    foreach ($path in $possibleConfFiles) {
+        $testPath = Join-Path $AppDest $path
+        if (Test-Path $testPath) {
+            $confFile = $testPath
+            break
+        }
+    }
+    
+    # Required JVM arguments for Java 17+ compatibility (with -J prefix for NetBeans Platform)
+    $requiredArgs = @(
+        "-J--add-opens=java.base/java.net=ALL-UNNAMED",
+        "-J--enable-native-access=ALL-UNNAMED", 
+        "-J--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "-J--add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED",
+        "-J--add-opens=java.base/java.security=ALL-UNNAMED",
+        "-J--add-opens=java.base/java.util=ALL-UNNAMED"
+        "-J--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        "-J--add-opens=java.desktop/sun.awt=ALL-UNNAMED"
+    )
+    
+    if ($confFile) {
+        Write-Host "  -> Updating configuration: $($confFile.Replace($AppDest, '...'))" -ForegroundColor Gray
+        $content = Get-Content $confFile -Raw
+        
+        # Pattern to match default_options line (this is the main one used)
+        $defaultOptionsPattern = 'default_options="([^"]*)"'
+        
+        if ($content -match $defaultOptionsPattern) {
+            $existingOptions = $matches[1]
+            
+            # Add missing arguments to default_options
+            $newOptions = $existingOptions
+            foreach ($arg in $requiredArgs) {
+                if ($newOptions -notmatch [regex]::Escape($arg)) {
+                    $newOptions = "$newOptions $arg"
+                }
+            }
+            
+            # Only update if changes were made
+            if ($newOptions -ne $existingOptions) {
+                $newContent = $content -replace $defaultOptionsPattern, "default_options=`"$newOptions`""
+                Set-Content -Path $confFile -Value $newContent -NoNewline -Encoding UTF8
+                Write-Host "  -> Added JVM arguments to default_options" -ForegroundColor Green
+                Write-Host "  -> New default_options: $newOptions" -ForegroundColor Gray
+            } else {
+                Write-Host "  -> All required JVM arguments already present in default_options" -ForegroundColor Green
+            }
+        } else {
+            # Add new default_options line if it doesn't exist
+            $newOptionsLine = "default_options=`"$($requiredArgs -join ' ')`""
+            $newContent = $content.Trim() + "`n`n$newOptionsLine`n"
+            Set-Content -Path $confFile -Value $newContent -NoNewline -Encoding UTF8
+            Write-Host "  -> Created default_options with JVM arguments" -ForegroundColor Green
+        }
+        
+        # Also update netbeans_default_options for backward compatibility
+        $netbeansOptionsPattern = 'netbeans_default_options="([^"]*)"'
+        if ($content -match $netbeansOptionsPattern) {
+            $existingNetbeansOptions = $matches[1]
+            $newNetbeansOptions = $existingNetbeansOptions
+            foreach ($arg in $requiredArgs) {
+                if ($newNetbeansOptions -notmatch [regex]::Escape($arg)) {
+                    $newNetbeansOptions = "$newNetbeansOptions $arg"
+                }
+            }
+            
+            if ($newNetbeansOptions -ne $existingNetbeansOptions) {
+                $newContent = $newContent -replace $netbeansOptionsPattern, "netbeans_default_options=`"$newNetbeansOptions`""
+                Set-Content -Path $confFile -Value $newContent -NoNewline -Encoding UTF8
+                Write-Host "  -> Also updated netbeans_default_options" -ForegroundColor Green
+            }
+        } else {
+            # Add netbeans_default_options if it doesn't exist
+            $netbeansOptionsLine = "netbeans_default_options=`"$($requiredArgs -join ' ')`""
+            $newContent = $newContent.Trim() + "`n$netbeansOptionsLine`n"
+            Set-Content -Path $confFile -Value $newContent -NoNewline -Encoding UTF8
+        }
+        
+    } else {
+        # Create new configuration file if it doesn't exist
+        $confDir = Join-Path $AppDest "etc"
+        $newConfFile = Join-Path $confDir "${BrandingToken}.conf"
+        
+        if (-not (Test-Path $confDir)) {
+            New-Item -ItemType Directory -Path $confDir | Out-Null
+        }
+        
+        $confContent = @"
+# Configuration file for ${BrandingToken}
+# Generated automatically during build process
+default_options="$($requiredArgs -join ' ')"
+netbeans_default_options="$($requiredArgs -join ' ')"
+"@
+        
+        Set-Content -Path $newConfFile -Value $confContent -Encoding UTF8
+        Write-Host "  -> Created configuration file with JVM arguments" -ForegroundColor Green
+    }
+}
+
 # Get branding token from parent POM
 $parentPomPath = Join-Path $rootDir "pom.xml"
 [xml]$parentPom = Get-Content $parentPomPath
@@ -161,6 +275,9 @@ if ($brandedCoreJar) {
 } else {
     Write-Host "  -> Warning: core_${brandingToken}.jar not found" -ForegroundColor Yellow
 }
+
+Write-Host "  -> Injecting JVM arguments into configuration..." -ForegroundColor Gray
+Add-JvmArgumentsToConfig -AppDest $appDest -BrandingToken $brandingToken
 
 # --- [ Step 3: Create Custom JRE ] -----------------------------------
 Write-Host "[3/4] Creating custom JRE..." -ForegroundColor Cyan

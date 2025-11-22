@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.example</groupId>
         <artifactId>MavenPlatformWordApp-parent</artifactId>
-        <version>2025.11.22.1506</version>
+        <version>2025.11.22.1805</version>
     </parent>
 
     <artifactId>MavenPlatformWordApp-app</artifactId>
@@ -20,6 +20,15 @@
             <!---Djava.security.manager=allow-->
             --add-opens=java.base/java.net=ALL-UNNAMED
             <!-- add more "add opens" if needed -->
+            <!--Avoid extra warning when launching-->
+            --add-opens=java.base/java.lang=ALL-UNNAMED
+            --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED
+            --add-opens=java.base/java.security=ALL-UNNAMED
+            --add-opens=java.base/java.util=ALL-UNNAMED
+            <!--Additional common Netbeans requirement-->
+            --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+            <!--For AWT-related classes-->
+            --add-opens=java.desktop/sun.awt=ALL-UNNAMED
         </jpms-flags>
     </properties>
 
