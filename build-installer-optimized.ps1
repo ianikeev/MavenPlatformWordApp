@@ -477,7 +477,7 @@ if (-not $jreUpToDate) {
         try {
             Write-Host "  -> Creating custom JRE with jlink..." -ForegroundColor Gray
             & $jlinkPath --add-modules ($modulesList -join ",") --output $jreDest `
-                --strip-debug --no-man-pages --no-header-files --compress=2
+                --strip-debug --no-man-pages --no-header-files
             
             if (Test-Path (Join-Path $jreDest "bin" "java$exeExt")) {
                 Write-Host "  -> JRE created successfully" -ForegroundColor Green
