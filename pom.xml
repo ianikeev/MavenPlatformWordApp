@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>MavenPlatformWordApp-parent</artifactId>
+    <version>2025.11.22.1506</version>
+    <packaging>pom</packaging>
+
+    <name>MavenPlatformWordApp-parent</name>
+
+    <properties>
+        <netbeans.version>RELEASE280</netbeans.version>
+        <brandingToken>mavenplatformwordapp</brandingToken>
+        <!-- NetBeans 22+ requires JDK 17+ -->
+        <maven.compiler.release>17</maven.compiler.release>
+    </properties>
+
+    <modules>
+        <module>branding</module>
+        <module>application</module>
+    </modules>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.netbeans.utilities</groupId>
+                    <artifactId>nbm-maven-plugin</artifactId>
+                    <version>14.4</version>
+                    <extensions>true</extensions>
+                    <configuration>
+                        <brandingToken>${brandingToken}</brandingToken>
+                        <cluster>${brandingToken}</cluster>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.2</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>

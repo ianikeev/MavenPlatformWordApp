@@ -1,0 +1,123 @@
+#+title: Building Netbeans Platform Application with Maven and Automatic Versioning
+
+* Prerequisites for the Powershell Script
+
+1. *Folder Structure*. This script assumes the Netbeans Platform application has
+   the standard Maven structure:
+
+   #+BEGIN_SRC
+   /root
+     /application (or 'client') -> Contains the branding/bundle config
+     /branding
+     /module1
+     /module2
+   pom.xml (Parent)
+   installer.nsis
+   build-installer.ps
+   launcher.c
+  #+END_SRC
+
+2. *The App Launcher*. Compile it with ~cl launcher.c /link /SUBSYSTEM:WINDOWS
+   kernel32.lib user32.lib~ from the Visual Studio Development Console.
+
+   This launcher is specifically made for Windows and is compiled with
+   Microsoft's Visual C++ compiler. It checks if it's run from the console. If
+   it is so, it attaches itself to it and redirects =stdin=, =stdout=, and =stderr=,
+   if not, it runs as a proper GUI program. The application exe name is
+   hardcoded, so it needs to be changed for separate applications.
+
+* Building the App.
+
+Remove ~-Djava.security.manager=allow~ from the app =pom.xml= to avoid deprecation
+error and to be able to build.
+
+Pay special attention to the pom.xml files, as they need to provide proper
+branding token and configuration:
+
+Parent pom:
+#+BEGIN_SRC xml
+    <!-- Skipped from the beginning -->
+    <properties>
+        <netbeans.version>RELEASE280</netbeans.version>
+        <brandingToken>mavenplatformwordapp</brandingToken>
+        <!-- NetBeans 22+ requires JDK 17+ -->
+        <maven.compiler.release>17</maven.compiler.release>
+    </properties>
+
+    <modules>
+        <module>branding</module>
+        <module>application</module>
+    </modules>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.netbeans.utilities</groupId>
+                    <artifactId>nbm-maven-plugin</artifactId>
+                    <version>14.4</version>
+                    <!-- The following up to the </plugin> is important -->
+                    <extensions>true</extensions>
+                    <configuration>
+                        <brandingToken>${brandingToken}</brandingToken>
+                        <cluster>${brandingToken}</cluster>
+                    </configuration>
+                </plugin>
+    <!-- Rest of the file -->
+#+END_SRC
+
+branding/pom.xml:
+
+#+BEGIN_SRC xml
+    <!-- Skipped from the beggining of the file -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.netbeans.api</groupId>
+            <artifactId>org-netbeans-api-annotations-common</artifactId>
+            <version>${netbeans.version}</version>
+        </dependency>
+    </dependencies>
+
+    <!-- Skipped some more -->
+            <plugin>
+                <groupId>org.apache.netbeans.utilities</groupId>
+                <artifactId>nbm-maven-plugin</artifactId>
+                <configuration>
+                    <cluster>platform</cluster>
+                    <brandingToken>${brandingToken}</brandingToken>
+                    <moduleType>autoload</moduleType>
+                </configuration>
+            </plugin>
+    <!-- Rest of the file -->
+#+END_SRC
+
+app/pom.xml:
+#+BEGIN_SRC xml
+<!-- Skipped from the beginning of the file -->
+
+        <!-- Remove obsolete options -->
+        <jpms-flags>
+          <!---Djava.security.manager=allow-->
+            --add-opens=java.base/java.net=ALL-UNNAMED
+            <!-- add more "add opens" if needed -->
+        </jpms-flags>
+
+        <!-- In the "build" section -->
+            <plugin>
+                <groupId>org.apache.netbeans.utilities</groupId>
+                <artifactId>nbm-maven-plugin</artifactId>
+                <configuration>
+                    <brandingToken>${brandingToken}</brandingToken>
+                </configuration>
+            </plugin>
+<!-- Rest of the file -->
+#+END_SRC
+
+The above will let the =build-installer.ps1= script to inject the proper
+=currentVersion= after the build. You should set the name of the app in Netbeans
+itself by right-clicking branding -> Branding, and then using the graphical tool
+to change the app title and to set the =currentVersion=. For example, in this case
+~org/netbeans/core/startup/Bundle.properties~ contains ~currentVersion=My Maven
+Platform Word App {0}~. The ~{0}~ here is important, as it tells the build script
+where to inject the generated version.
