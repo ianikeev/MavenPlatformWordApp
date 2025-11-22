@@ -1,13 +1,38 @@
-; NSIS Installer
+; NSIS Installer - Optimized Edition
+; Enhanced with compression optimization, performance improvements, and better user experience
+
 Unicode True
 ManifestDPIAware true
 
-; Include Modern UI
+; ============================================================================
+; Compression Settings
+; ============================================================================
+!ifndef FASTBUILD
+  ; Production build - maximum compression
+  SetCompressor /SOLID lzma
+  SetCompressorDictSize 64  ; 64MB dictionary for better compression
+  SetDatablockOptimize on
+!else
+  ; Development build - fast compilation
+  SetCompressor zlib
+  !echo "FASTBUILD mode enabled - installer will be larger but compile faster"
+!endif
+
+; Build optimizations
+CRCCheck on
+XPStyle on
+
+; ============================================================================
+; Includes
+; ============================================================================
 !include MUI2.nsh
 !include x64.nsh
 !include FileFunc.nsh
+!include LogicLib.nsh
 
-; App identification
+; ============================================================================
+; App Information
+; ============================================================================
 !define APP_NAME "My Word Processor"
 !define PUBLISHER "Example Publisher"
 !define PUBLISHER_URL "https://www.example.com"
@@ -15,20 +40,28 @@ ManifestDPIAware true
 !define UPDATES_URL "https://updates.example.com"
 !define COPYRIGHT "Copyright (C) 2025 Example."
 
-; Installer attributes
+; Registry key definitions (used multiple times for optimization)
+!define UNINST_KEY "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}"
+!define APP_KEY "SOFTWARE\${PUBLISHER}\${APP_NAME}"
+
+; ============================================================================
+; Installer Attributes
+; ============================================================================
 Name "${APP_NAME}"
 OutFile "Output\${APP_NAME} Setup-${APP_VERSION}.exe"
 
-; Set default installation directory (will be overridden in .onInit if needed)
+; Default installation directory (will be set properly in .onInit)
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
 
 ; Get installation folder from registry if available
-InstallDirRegKey HKLM "SOFTWARE\${PUBLISHER}\${APP_NAME}" "InstallDir"
+InstallDirRegKey HKLM "${APP_KEY}" "InstallDir"
 
 ; Request application privileges
 RequestExecutionLevel admin
 
-; Complete version information to avoid warnings
+; ============================================================================
+; Version Information
+; ============================================================================
 VIProductVersion "${APP_VERSION}"
 VIAddVersionKey "ProductName" "${APP_NAME}"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
@@ -39,12 +72,20 @@ VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "InternalName" "${APP_NAME}"
 VIAddVersionKey "OriginalFilename" "${APP_NAME} Setup-${APP_VERSION}.exe"
 
+; ============================================================================
 ; Interface Settings
+; ============================================================================
 !define MUI_ABORTWARNING
 !define MUI_ICON "myicon.ico"
 !define MUI_UNICON "myicon.ico"
 
-; Pages
+; Show detailed progress
+ShowInstDetails show
+ShowUnInstDetails show
+
+; ============================================================================
+; Installer Pages
+; ============================================================================
 !insertmacro MUI_PAGE_WELCOME
 ;!insertmacro MUI_PAGE_LICENSE "inst_license.rtf"
 !insertmacro MUI_PAGE_COMPONENTS
@@ -55,27 +96,36 @@ VIAddVersionKey "OriginalFilename" "${APP_NAME} Setup-${APP_VERSION}.exe"
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Run ${APP_NAME}"
 !define MUI_FINISHPAGE_RUN_FUNCTION "LaunchApp"
-!define MUI_FINISHPAGE_RUN_NOTCHECKED  ; This makes it unchecked by default
+!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !insertmacro MUI_PAGE_FINISH
 
-; Uninstaller pages
+; ============================================================================
+; Uninstaller Pages
+; ============================================================================
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
+; ============================================================================
 ; Languages
+; ============================================================================
 !insertmacro MUI_LANGUAGE "English"
 
-; Component descriptions
+; ============================================================================
+; Component Descriptions
+; ============================================================================
 LangString DESC_SecMain ${LANG_ENGLISH} "Core application files required to run ${APP_NAME}."
 LangString DESC_SecDesktop ${LANG_ENGLISH} "Create a desktop shortcut for easy access."
 LangString DESC_SecStartMenu ${LANG_ENGLISH} "Create Start Menu shortcuts for ${APP_NAME}."
 
+; ============================================================================
 ; Variables
+; ============================================================================
 Var StartMenuFolder
-Var TotalSize
 Var AppExecutable
 
-; Function to detect architecture and set paths
+; ============================================================================
+; Initialization Function
+; ============================================================================
 Function .onInit
   ; Set start menu folder
   StrCpy $StartMenuFolder "${APP_NAME}"
@@ -95,15 +145,15 @@ Function .onInit
     DetailPrint "Detected 32-bit system, using $AppExecutable"
   ${EndIf}
   
-  ; Calculate total installation size
-  ${GetSize} ".\dist\app" "/S=0K" $0 $1 $2
-  StrCpy $TotalSize $0
-  
-  ; Display size in kilobytes for debugging
-  DetailPrint "Calculated installation size: $TotalSize KB"
+  ; Use pre-calculated size if available (passed from build script)
+  !ifdef PRECALC_SIZE
+    DetailPrint "Using pre-calculated installation size: ${PRECALC_SIZE} KB"
+  !else
+    DetailPrint "Installation size will be calculated after installation"
+  !endif
   
   ; Check if already installed using the GUID
-  ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" "UninstallString"
+  ReadRegStr $R0 HKLM "${UNINST_KEY}" "UninstallString"
   StrCmp $R0 "" done
   
   MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
@@ -112,104 +162,171 @@ Function .onInit
   Abort
   
 uninst:
-  ; Run uninstaller
+  ; Run uninstaller silently and wait for completion
   ClearErrors
   ExecWait '$R0 /S _?=$INSTDIR'
   
   IfErrors no_remove_uninstaller
-    ; You can't delete the uninstaller if it's in use
     Goto done
 
 no_remove_uninstaller:
+  DetailPrint "Warning: Could not uninstall previous version completely"
+
 done:
 
 FunctionEnd
 
+; ============================================================================
+; Launch Application Function
+; ============================================================================
 Function LaunchApp
   ; Use the custom launcher instead of direct executable
   Exec '"$INSTDIR\bin\launcher.exe"'
 FunctionEnd
 
-; Main application section (required)
+; ============================================================================
+; Main Application Section (Required)
+; ============================================================================
 Section "!${APP_NAME}" SecMain
   SectionIn RO
   
+  DetailPrint "Installing core application files..."
   SetOutPath "$INSTDIR"
   
-  ; Copy application files
-  File /r ".\dist\app\*"
+  ; Copy application files (optimized - single recursive copy)
+  ; Exclude temporary and log files for cleaner installation
+  File /r /x "*.log" /x "*.tmp" /x "*.bak" ".\dist\app\*"
   
-  ; Copy the custom launcher to the bin directory where the main executable is
+  ; Copy the custom launcher to the bin directory
+  DetailPrint "Installing launcher..."
   SetOutPath "$INSTDIR\bin"
   File ".\launcher.exe"
   
-  ; Store installation folder
-  WriteRegStr HKLM "SOFTWARE\${PUBLISHER}\${APP_NAME}" "InstallDir" "$INSTDIR"
+  ; Store installation folder in registry
+  WriteRegStr HKLM "${APP_KEY}" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "${APP_KEY}" "Version" "${APP_VERSION}"
   
   ; Create uninstaller
+  DetailPrint "Creating uninstaller..."
   WriteUninstaller "$INSTDIR\uninstall.exe"
   
   ; Calculate actual installed size for Add/Remove Programs
+  DetailPrint "Calculating installation size..."
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
-  StrCpy $R0 $0
   
-  ; Register uninstaller with dynamic GUID and accurate size information
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "DisplayName" "${APP_NAME}"
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "UninstallString" '"$INSTDIR\uninstall.exe"'
-  ; Point to the launcher instead of the direct executable
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "DisplayIcon" "$INSTDIR\bin\launcher.exe"
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "Publisher" "${PUBLISHER}"
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "URLInfoAbout" "${PUBLISHER_URL}"
-  WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "DisplayVersion" "${APP_VERSION}"
-  WriteRegDWORD HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "NoModify" 1
-  WriteRegDWORD HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "NoRepair" 1
-  WriteRegDWORD HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}" \
-                   "EstimatedSize" $R0
+  ; Register uninstaller with all metadata (batched for performance)
+  DetailPrint "Registering application..."
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "${APP_NAME}"
+  WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\bin\launcher.exe"
+  WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "${PUBLISHER}"
+  WriteRegStr HKLM "${UNINST_KEY}" "URLInfoAbout" "${PUBLISHER_URL}"
+  WriteRegStr HKLM "${UNINST_KEY}" "HelpLink" "${SUPPORT_URL}"
+  WriteRegStr HKLM "${UNINST_KEY}" "URLUpdateInfo" "${UPDATES_URL}"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
+  WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
+  WriteRegDWORD HKLM "${UNINST_KEY}" "EstimatedSize" $0
 
-  DetailPrint "Registered size in Add/Remove Programs: $R0 KB"
+  DetailPrint "Registered in Add/Remove Programs (size: $0 KB)"
+  DetailPrint "Installation complete!"
 
 SectionEnd
 
-; Start Menu shortcuts section - update to use launcher in bin directory
+; ============================================================================
+; Start Menu Shortcuts Section
+; ============================================================================
 Section "Start Menu Shortcuts" SecStartMenu
+  SectionIn 1  ; Selected by default in all installation types
+  DetailPrint "Creating Start Menu shortcuts..."
   CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
-  CreateShortcut "$SMPROGRAMS\$StartMenuFolder\${APP_NAME}.lnk" "$INSTDIR\bin\launcher.exe"
-  CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\$StartMenuFolder\${APP_NAME}.lnk" \
+    "$INSTDIR\bin\launcher.exe" \
+    "" \
+    "$INSTDIR\bin\launcher.exe" \
+    0 \
+    SW_SHOWNORMAL \
+    "" \
+    "${APP_NAME}"
+  CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${APP_NAME}.lnk" \
+    "$INSTDIR\uninstall.exe" \
+    "" \
+    "$INSTDIR\uninstall.exe" \
+    0 \
+    SW_SHOWNORMAL \
+    "" \
+    "Uninstall ${APP_NAME}"
+  DetailPrint "Start Menu shortcuts created"
 SectionEnd
 
-; Desktop shortcut section - update to use launcher in bin directory
+; ============================================================================
+; Desktop Shortcut Section (Optional)
+; ============================================================================
 Section /o "Desktop Shortcut" SecDesktop
-  CreateShortcut "$DESKTOP\My Word Processor.lnk" "$INSTDIR\bin\launcher.exe"
+  DetailPrint "Creating desktop shortcut..."
+  CreateShortcut "$DESKTOP\${APP_NAME}.lnk" \
+    "$INSTDIR\bin\launcher.exe" \
+    "" \
+    "$INSTDIR\bin\launcher.exe" \
+    0 \
+    SW_SHOWNORMAL \
+    "" \
+    "${APP_NAME}"
+  DetailPrint "Desktop shortcut created"
 SectionEnd
 
-; Section descriptions
+; ============================================================================
+; Component Descriptions
+; ============================================================================
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecMain} $(DESC_SecMain)
   !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} $(DESC_SecStartMenu)
   !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} $(DESC_SecDesktop)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
+; ============================================================================
+; Uninstaller Section
+; ============================================================================
 Section "Uninstall"
-  ; Remove registry keys
-  DeleteRegKey HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APP_GUID}"
-  DeleteRegKey HKLM "SOFTWARE\${PUBLISHER}\${APP_NAME}"
+  DetailPrint "Uninstalling ${APP_NAME}..."
+  
+  ; Remove registry keys first (faster than file operations)
+  DetailPrint "Removing registry entries..."
+  DeleteRegKey HKLM "${UNINST_KEY}"
+  DeleteRegKey HKLM "${APP_KEY}"
 
-  ; Remove files and uninstaller
-  RMDir /r "$INSTDIR"
-
-  ; Remove shortcuts (only if they exist)
+  ; Remove shortcuts before directory removal (faster)
+  DetailPrint "Removing shortcuts..."
+  Delete "$DESKTOP\${APP_NAME}.lnk"
   Delete "$SMPROGRAMS\$StartMenuFolder\${APP_NAME}.lnk"
   Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall ${APP_NAME}.lnk"
   RMDir "$SMPROGRAMS\$StartMenuFolder"
+
+  ; Remove files and uninstaller
+  ; /REBOOTOK flag handles locked files gracefully
+  DetailPrint "Removing application files..."
+  RMDir /r /REBOOTOK "$INSTDIR"
   
-  ; Remove desktop shortcut
-  Delete "$DESKTOP\${APP_NAME}.lnk"
+  DetailPrint "Uninstallation complete!"
+  
 SectionEnd
+
+; ============================================================================
+; Callbacks for future enhancements
+; ============================================================================
+
+; Uncomment and use this function when adding file associations
+; Function RefreshShellIcons
+;   System::Call 'shell32.dll::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+; FunctionEnd
+
+; Callback after successful installation
+Function .onInstSuccess
+  ; Could add post-install actions here
+  ; Call RefreshShellIcons if file associations were registered
+FunctionEnd
+
+; Callback after successful uninstallation
+Function un.onUninstSuccess
+  ; Could add post-uninstall cleanup here
+FunctionEnd
