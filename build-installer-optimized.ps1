@@ -10,8 +10,67 @@ param(
     [switch]$Offline,        # Use Maven offline mode after first build
     [switch]$IncrementalBuild, # Enable incremental build detection
     [switch]$SkipJRE,        # Skip JRE creation if already exists
-    [switch]$Verbose         # Show detailed timing information
+    [switch]$Verbose,        # Show detailed timing information
+    [switch]$Help,           # Show help message
+    [switch]$h               # Show help message (short form)
 )
+
+# --- [ Help Message ] ------------------------------------------------
+
+if ($Help -or $h) {
+    Write-Host ""
+    Write-Host "NetBeans Platform Maven Build Script - Optimized Edition" -ForegroundColor Cyan
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "USAGE:" -ForegroundColor Yellow
+    Write-Host "  .\build-installer-optimized.ps1 [OPTIONS]"
+    Write-Host ""
+    Write-Host "OPTIONS:" -ForegroundColor Yellow
+    Write-Host "  -FastBuild          Use fast compression for quicker builds (larger installer)"
+    Write-Host "                      Recommended for development/testing iterations"
+    Write-Host ""
+    Write-Host "  -IncrementalBuild   Skip Maven build if source files haven't changed"
+    Write-Host "                      Saves significant time on repeated builds"
+    Write-Host ""
+    Write-Host "  -SkipJRE            Reuse existing JRE if Java version hasn't changed"
+    Write-Host "                      Saves 30-60 seconds on subsequent builds"
+    Write-Host ""
+    Write-Host "  -Offline            Use Maven offline mode (skip dependency updates)"
+    Write-Host "                      Only use after first successful build"
+    Write-Host ""
+    Write-Host "  -SkipTests          Skip Maven test execution (default: enabled)"
+    Write-Host "                      Tests are skipped by default for faster builds"
+    Write-Host ""
+    Write-Host "  -Verbose            Show detailed timing breakdown for each build phase"
+    Write-Host "                      Useful for identifying performance bottlenecks"
+    Write-Host ""
+    Write-Host "  -Help, -h           Show this help message"
+    Write-Host ""
+    Write-Host "EXAMPLES:" -ForegroundColor Yellow
+    Write-Host "  # Full production build (maximum compression)"
+    Write-Host "  .\build-installer-optimized.ps1"
+    Write-Host ""
+    Write-Host "  # Fast development build with all optimizations"
+    Write-Host "  .\build-installer-optimized.ps1 -FastBuild -IncrementalBuild -SkipJRE -Offline"
+    Write-Host ""
+    Write-Host "  # Production build with detailed timing"
+    Write-Host "  .\build-installer-optimized.ps1 -Verbose"
+    Write-Host ""
+    Write-Host "  # Quick test build (fastest possible)"
+    Write-Host "  .\build-installer-optimized.ps1 -FastBuild -IncrementalBuild -SkipJRE"
+    Write-Host ""
+    Write-Host "PERFORMANCE TIPS:" -ForegroundColor Yellow
+    Write-Host "  • First build: Run without flags to populate caches"
+    Write-Host "  • Development: Use -FastBuild -IncrementalBuild -SkipJRE for 80%+ faster builds"
+    Write-Host "  • Release: Run clean without flags for maximum compression"
+    Write-Host "  • After dependency changes: Remove -Offline flag"
+    Write-Host ""
+    Write-Host "OUTPUT:" -ForegroundColor Yellow
+    Write-Host "  Installer will be created in: .\Output\"
+    Write-Host "  Build artifacts cached in: .\.build-cache\"
+    Write-Host ""
+    exit 0
+}
 
 # --- [ Configuration & Setup ] ---------------------------------------
 
