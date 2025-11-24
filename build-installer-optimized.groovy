@@ -53,20 +53,72 @@ def ant = new AntBuilder()
 def timings = [:]
 def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
 
-// Colorize helper
-def colorize = { String text, String color ->
-    def colors = [
-        red: '\033[31m',
-        green: '\033[32m',
-        yellow: '\033[33m',
-        cyan: '\033[36m',
-        gray: '\033[37m',
-        reset: '\033[0m'
-    ]
-    if (System.getenv('TERM') && System.getenv('TERM') != 'dumb' && !isWindows) {
-        return "${colors[color]}${text}${colors.reset}"
+/**
+ * Determines if the current environment supports ANSI color codes.
+ * This is the cross-platform check without external dependencies.
+ */
+boolean isColorSupported() {
+    def osName = System.getProperty('os.name').toLowerCase()
+
+    // 1. Always support color on non-Windows OS
+    if (!osName.contains('windows')) {
+        return true
     }
-    return text
+
+    // 2. On Windows, check for modern terminals that support ANSI natively:
+    //    - TERM is often set in modern shells/terminals (Git Bash, WSL, some PowerShell setups)
+    //    - VS Code sets COLORTERM
+    //    - Windows Terminal sets WT_SESSION
+    def term = System.getenv('TERM')
+    def colorTerm = System.getenv('COLORTERM')
+    def wtSession = System.getenv('WT_SESSION')
+
+    if (term || colorTerm || wtSession) {
+        return true
+    }
+
+    // 3. Default for older Windows Console Host (CMD/PowerShell)
+    return false
+}
+
+/**
+ * Colorizes the given message using raw ANSI escape codes, but only if
+ * the environment is detected as safe (IS_COLOR_SUPPORTED is true).
+ *
+ * @param message The string content to colorize.
+ * @param color The desired color (e.g., 'RED', 'GREEN', 'YELLOW', 'BLUE'). Case-insensitive.
+ * @return The colorized string or the original uncolorized string.
+ */
+String colorize(String message, String color) {
+    // If color is not supported, return the message immediately.
+    if (!isColorSupported()) {
+        return message
+    }
+
+    // Define the ANSI escape start sequence
+    final def ESC = '\u001B['
+    // Define the reset sequence
+    final def RESET = '0m'
+
+    // Define color codes (Foreground)
+    def colors = [
+        RED: '31m',
+        GREEN: '32m',
+        YELLOW: '33m',
+        BLUE: '34m',
+        CYAN: '36m',
+        MAGENTA: '35m'
+    ]
+
+    def code = colors[color.toUpperCase()]
+
+    if (code) {
+        // Apply the color code, the message, and then the reset code
+        return "${ESC}${code}${message}${ESC}${RESET}"
+    } else {
+        // Return uncolorized if the color name is not recognized
+        return message
+    }
 }
 
 // --- [ Help Message ] ------------------------------------------------
@@ -103,13 +155,20 @@ ${colorize('OUTPUT:', 'yellow')}
 // --- [ Utility Functions ] -------------------------------------------
 
 def startTimedSection = { String name ->
+    // Stores the start time (in ms)
     timings[name] = System.currentTimeMillis()
 }
 
 def stopTimedSection = { String name ->
     if (timings.containsKey(name)) {
+        // Calculate elapsed time (duration) in seconds
         def elapsed = (System.currentTimeMillis() - timings[name]) / 1000.0
+
+        // 🛑 THE FIX: Overwrite the start time with the calculated DURATION
+        timings[name] = elapsed
+
         if (config.verbose) {
+            // NOTE: Must use the newly calculated 'elapsed' here for printing
             println colorize("  -> ${name} completed in ${String.format('%.2f', elapsed)}s", 'gray')
         }
         return elapsed
@@ -120,10 +179,10 @@ def executeCommand = { String command, File workDir = null ->
     if (config.verbose) {
         println colorize("  -> Executing: ${command}", 'gray')
     }
-    
+
     def outputBuffer = new ByteArrayOutputStream()
     def errorBuffer = new ByteArrayOutputStream()
-    
+
     def exitCode = 0
     try {
         ant.exec(
@@ -142,29 +201,29 @@ def executeCommand = { String command, File workDir = null ->
                 arg(value: command)
             }
         }
-        
+
         // Get the actual result using the timestamped property names
         def timestamp = ant.project.properties.findAll { it.key.startsWith('cmdResult_') }.max { it.key }?.key
         exitCode = (ant.project.properties[timestamp] ?: '0') as Integer
-        
+
         def outputKey = timestamp?.replace('cmdResult_', 'cmdOutput_')
         def errorKey = timestamp?.replace('cmdResult_', 'cmdError_')
-        
+
         def output = ant.project.properties[outputKey] ?: ''
         def error = ant.project.properties[errorKey] ?: ''
-        
+
         // Always show output in verbose mode or if there's an error
         if (config.verbose || exitCode != 0) {
             if (output) println output
             if (error) println error
         }
-        
+
         if (exitCode != 0) {
             throw new RuntimeException("Command failed with exit code ${exitCode}: ${command}\nOutput: ${output}\nError: ${error}")
         }
-        
+
         return [output: output, error: error, exitCode: exitCode]
-        
+
     } catch (Exception e) {
         println colorize("ERROR executing command: ${command}", 'red')
         println colorize("Exit code: ${exitCode}", 'red')
@@ -196,13 +255,13 @@ def cacheDir = new File(rootDir, '.build-cache')
 
 def testSourceChanged = {
     def cacheFile = new File(cacheDir, 'last-build.txt')
-    
+
     if (!cacheFile.exists()) {
         return true
     }
-    
+
     def lastBuildTime = Instant.parse(cacheFile.text.trim())
-    
+
     def changedCount = 0
     ant.fileScanner {
         fileset(dir: rootDir) {
@@ -216,7 +275,7 @@ def testSourceChanged = {
             changedCount++
         }
     }
-    
+
     return changedCount > 0
 }
 
@@ -229,14 +288,14 @@ def saveBuildTimestamp = {
 
 def addJvmArgumentsToConfig = { dest, token ->
     startTimedSection('JVM-Config')
-    
+
     def possibleConfFiles = [
         new File(dest, "etc/${token}.conf"),
         new File(dest, 'etc/netbeans.conf')
     ]
-    
+
     def confFile = possibleConfFiles.find { it.exists() }
-    
+
     def requiredArgs = [
         '-J--add-opens=java.base/java.net=ALL-UNNAMED',
         '-J--enable-native-access=ALL-UNNAMED',
@@ -247,25 +306,25 @@ def addJvmArgumentsToConfig = { dest, token ->
         '-J--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
         '-J--add-opens=java.desktop/sun.awt=ALL-UNNAMED'
     ]
-    
+
     if (confFile) {
         println colorize("  -> Updating configuration: ${confFile.name}", 'gray')
         def content = confFile.text
-        
+
         // Update default_options
         def defaultOptionsPattern = ~/default_options="([^"]*)"/
         def matcher = content =~ defaultOptionsPattern
-        
+
         if (matcher.find()) {
             def existingOptions = matcher.group(1)
             def newOptions = existingOptions
-            
+
             requiredArgs.each { arg ->
                 if (!newOptions.contains(arg)) {
                     newOptions = "${newOptions} ${arg}".trim()
                 }
             }
-            
+
             if (newOptions != existingOptions) {
                 content = content.replaceFirst(defaultOptionsPattern.pattern(), "default_options=\"${newOptions}\"")
                 confFile.text = content
@@ -279,22 +338,22 @@ def addJvmArgumentsToConfig = { dest, token ->
             confFile.text = content
             println colorize('  -> Created default_options with JVM arguments', 'green')
         }
-        
+
         // Also update netbeans_default_options
         content = confFile.text
         def netbeansOptionsPattern = ~/netbeans_default_options="([^"]*)"/
         matcher = content =~ netbeansOptionsPattern
-        
+
         if (matcher.find()) {
             def existingNetbeansOptions = matcher.group(1)
             def newNetbeansOptions = existingNetbeansOptions
-            
+
             requiredArgs.each { arg ->
                 if (!newNetbeansOptions.contains(arg)) {
                     newNetbeansOptions = "${newNetbeansOptions} ${arg}".trim()
                 }
             }
-            
+
             if (newNetbeansOptions != existingNetbeansOptions) {
                 content = content.replaceFirst(netbeansOptionsPattern.pattern(), "netbeans_default_options=\"${newNetbeansOptions}\"")
                 confFile.text = content
@@ -306,17 +365,17 @@ def addJvmArgumentsToConfig = { dest, token ->
         def confDir = new File(dest, 'etc')
         ant.mkdir(dir: confDir)
         def newConfFile = new File(confDir, "${token}.conf")
-        
+
         def confContent = """# Configuration file for ${token}
 # Generated automatically during build process
 default_options="${requiredArgs.join(' ')}"
 netbeans_default_options="${requiredArgs.join(' ')}"
 """
-        
+
         newConfFile.text = confContent
         println colorize('  -> Created configuration file with JVM arguments', 'green')
     }
-    
+
     stopTimedSection('JVM-Config')
 }
 
@@ -380,7 +439,7 @@ if (shouldBuild) {
     try {
         // Update all POM versions
         println colorize("  -> Setting version to ${version}...", 'gray')
-        
+
         ant.exec(
             executable: mvnCmd,
             dir: rootDir,
@@ -389,11 +448,13 @@ if (shouldBuild) {
             arg(value: 'versions:set')
             arg(value: "-DnewVersion=${version}")
             arg(value: '-DgenerateBackupPoms=false')
+            // 💡 Add Maven flag to force ANSI colors even in non-TTY environments
+            arg(value: '-Dstyle.color=always')
         }
-        
+
         // Build the application
         println colorize('  -> Building application (parallel mode)...', 'gray')
-        
+
         ant.exec(
             executable: mvnCmd,
             dir: rootDir,
@@ -402,15 +463,17 @@ if (shouldBuild) {
             arg(value: 'clean')
             arg(value: 'install')
             mavenOpts.each { arg(value: it) }
+            // 💡 Add Maven flag to force ANSI colors even in non-TTY environments
+            arg(value: '-Dstyle.color=always')
         }
-        
+
         saveBuildTimestamp()
-        
+
     } catch (Exception e) {
         println colorize("ERROR: Build failed - ${e.message}", 'red')
         System.exit(1)
     }
-    
+
     println colorize('Build successful!', 'green')
 } else {
     println colorize('Skipped Maven build (incremental)', 'green')
@@ -428,8 +491,8 @@ ant.mkdir(dir: distDir)
 
 // Find the built application cluster
 def builtApp = mavenTargetDir.listFiles()
-    ?.findAll { it.isDirectory() && !(it.name in ['classes', 'generated-sources', 'test-classes', 'maven-archiver', 'maven-status']) }
-    ?.first()
+?.findAll { it.isDirectory() && !(it.name in ['classes', 'generated-sources', 'test-classes', 'maven-archiver', 'maven-status']) }
+?.first()
 
 if (!builtApp) {
     println colorize("ERROR: Could not locate built application in ${mavenTargetDir}", 'red')
@@ -458,29 +521,29 @@ ant.fileScanner {
 if (brandedCoreJar) {
     println colorize("  -> Found branding JAR: ${brandedCoreJar.name}", 'gray')
     def tempDir = Files.createTempDirectory('nbm-inject').toFile()
-    
+
     try {
         // Extract JAR using Ant
         ant.unzip(src: brandedCoreJar, dest: tempDir)
-        
+
         // Find and update Bundle.properties
         def possibleBundlePaths = [
             "org/netbeans/core/startup/Bundle_${brandingToken}.properties",
             'org/netbeans/core/startup/Bundle.properties'
         ]
-        
+
         def bundleFile = possibleBundlePaths.collect { new File(tempDir, it) }.find { it.exists() }
-        
+
         if (bundleFile) {
             def content = bundleFile.text
-            
+
             if (content.contains('currentVersion')) {
                 def newContent = content.replace('{0}', version)
-                
+
                 if (newContent != content) {
                     bundleFile.text = newContent
                     println colorize("  -> Updated currentVersion to: ${version}", 'green')
-                    
+
                     // Repack JAR using Ant
                     ant.delete(file: brandedCoreJar)
                     ant.zip(destfile: brandedCoreJar, basedir: tempDir)
@@ -493,7 +556,7 @@ if (brandedCoreJar) {
         } else {
             println colorize('  -> Warning: Bundle.properties not found in JAR', 'yellow')
         }
-        
+
     } finally {
         ant.delete(dir: tempDir, quiet: true)
     }
@@ -524,7 +587,7 @@ def currentJavaVersion = ''
 try {
     def versionProp = "javaVersion_${System.currentTimeMillis()}"
     def errorProp = "javaError_${System.currentTimeMillis()}"
-    
+
     ant.exec(
         executable: 'java',
         failonerror: false,
@@ -533,7 +596,7 @@ try {
     ) {
         arg(value: '-version')
     }
-    
+
     // java -version outputs to stderr, not stdout
     def versionText = ant.project.properties[errorProp] ?: ant.project.properties[versionProp] ?: ''
     if (versionText) {
@@ -560,9 +623,9 @@ if (!jreUpToDate) {
             'java.base', 'java.desktop', 'java.logging', 'java.prefs',
             'java.xml', 'java.instrument', 'java.management', 'jdk.unsupported'
         ].join(',')
-        
+
         println colorize('  -> Creating custom JRE with jlink...', 'gray')
-        
+
         ant.exec(
             executable: jlinkPath,
             failonerror: false,
@@ -576,10 +639,10 @@ if (!jreUpToDate) {
             arg(value: '--no-man-pages')
             arg(value: '--no-header-files')
         }
-        
+
         if (new File(jreDest, "bin/java${exeExt}").exists()) {
             println colorize('  -> JRE created successfully', 'green')
-            
+
             // Cache JRE version
             ant.mkdir(dir: cacheDir)
             jreVersionFile.text = currentJavaVersion
@@ -633,12 +696,12 @@ if (config.fastBuild) {
 
 try {
     println colorize('  -> Compiling NSIS installer...', 'gray')
-    
+
     ant.exec(executable: nsisCmd, failonerror: true) {
         nsisArgs.each { arg(value: it) }
         arg(value: nsisScript.absolutePath)
     }
-    
+
 } catch (Exception e) {
     println colorize("ERROR: Installer creation failed - ${e.message}", 'red')
     System.exit(1)
@@ -661,10 +724,26 @@ println ''
 // Show timing breakdown if verbose
 if (config.verbose && timings.size() > 0) {
     println colorize('Timing Breakdown:', 'yellow')
-    timings.sort { it.value }.each { name, startTime ->
-        def elapsed = (System.currentTimeMillis() - startTime) / 1000.0
-        println colorize("  ${name} : ${String.format('%.2f', elapsed)}s", 'gray')
+
+    def totalSegmentTime = 0.0
+
+    // Sort by the DURATION (it.value) now, since it's no longer the start time
+    // We iterate over [name: duration] pairs.
+    timings.sort { it.value }.each { name, duration ->
+
+        // Add the stored duration directly to the total
+        totalSegmentTime += duration
+
+        // Print the stored duration
+        println colorize("  ${name} : ${String.format('%.2f', duration)}s", 'gray')
     }
+
+    // Add a separator for clarity
+    println colorize('  --------------------------', 'gray')
+
+    // Display the total time for the timed segments
+    println colorize("  TOTAL SEGMENTS : ${String.format('%.2f', totalSegmentTime)}s", 'yellow')
+
     println ''
 }
 
